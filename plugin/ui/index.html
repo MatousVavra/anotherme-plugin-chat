@@ -1,0 +1,185 @@
+<div class="chat-layout" x-data="chatPlugin()">
+    <aside class="thread-panel">
+        <div class="thread-header">
+            <span class="thread-header-title" x-text="showArchived ? 'Archived' : 'Threads'"></span>
+            <button class="thread-new-btn" @click="newConversation()" aria-label="New conversation" x-show="!showArchived">+</button>
+        </div>
+        <div class="thread-search" x-show="!showArchived">
+            <input
+                type="text"
+                class="thread-search-input"
+                placeholder="Search conversations..."
+                x-model="searchQuery"
+                @input="searchConversations($event.target.value)"
+            >
+        </div>
+        <div class="thread-filter">
+            <button class="thread-filter-btn" :class="{ active: !showArchived }" @click="toggleArchived()" x-show="showArchived">Active</button>
+            <button class="thread-filter-btn" :class="{ active: showArchived }" @click="toggleArchived()" x-show="!showArchived">Archived</button>
+        </div>
+        <div class="thread-list" x-show="conversations.length > 0">
+            <template x-for="conv in conversations" :key="conv.id">
+                <div class="thread-item-wrapper">
+                    <button
+                        class="thread-item"
+                        :class="{ active: activeId === conv.id }"
+                        @click="loadConversation(conv.id)"
+                        :aria-current="activeId === conv.id ? 'true' : undefined"
+                    >
+                        <span class="thread-item-title" x-text="conv.title || 'Untitled'"></span>
+                        <span class="thread-item-date" x-text="AM.utils.formatDate(conv.updated_at)"></span>
+                    </button>
+                    <div class="thread-actions">
+                        <button class="thread-action-btn" @click.stop="showArchived ? unarchiveConversation(conv.id) : archiveConversation(conv.id)" :title="showArchived ? 'Unarchive' : 'Archive'">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+                        </button>
+                        <button class="thread-action-btn thread-action-danger" @click.stop="deleteConversation(conv.id)" title="Delete">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        </button>
+                    </div>
+                </div>
+            </template>
+        </div>
+        <div class="thread-empty" x-show="conversations.length === 0">
+            <span x-text="showArchived ? 'No archived conversations' : 'No conversations yet'"></span>
+        </div>
+    </aside>
+
+    <div class="chat-area">
+        <div class="chat-header">
+            <button
+                class="mobile-thread-btn mobile-only"
+                @click="mobileThreadSheetOpen = true"
+                aria-label="Switch thread"
+            >
+                <span x-text="activeTitle || 'Threads'"></span>
+                <span class="caret">&#9662;</span>
+            </button>
+            <div class="assistant-avatar desktop-only">AM</div>
+            <div class="assistant-info desktop-only">
+                <span class="assistant-name">Assistant</span>
+                <span class="assistant-status" x-text="loading ? 'Thinking...' : 'Listening'"></span>
+            </div>
+        </div>
+
+        <div class="chat-messages" x-ref="chatMessages" @scroll.passive>
+            <div class="chat-empty" x-show="messages.length === 0 && !loading">
+                Your assistant is here. What happened today?
+            </div>
+
+            <template x-for="(msg, i) in messages" :key="i">
+                <div class="chat-msg" :class="msg.role">
+                    <template x-if="msg.role === 'user'">
+                        <div class="msg-user-group">
+                            <template x-if="editingIndex !== i">
+                                <div class="msg-bubble-group">
+                                    <button class="msg-bubble user-bubble" @click="startMessageEdit(i)" x-html="AM.utils.renderMarkdown(msg.content)"></button>
+                                    <button class="msg-copy-btn" @click="copyMessage(msg.content)" title="Copy">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                    </button>
+                                </div>
+                            </template>
+                            <template x-if="editingIndex === i">
+                                <div class="msg-edit-group">
+                                    <textarea class="msg-edit-input" x-ref="editInput" x-model="msg._editText" rows="3"></textarea>
+                                    <div class="msg-edit-actions">
+                                        <button class="btn-edit-save" @click="repromptMessage(i)">Save &amp; resend</button>
+                                        <button class="btn-edit-cancel" @click="editingIndex = null">Cancel</button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                    <template x-if="msg.role === 'assistant'">
+                        <div class="msg-assistant-group">
+                            <div class="msg-bubble-group">
+                                <div class="msg-bubble assistant-bubble" x-html="AM.utils.renderMarkdown(msg.content)"></div>
+                                <button class="msg-copy-btn" @click="copyMessage(msg.content)" title="Copy">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                </button>
+                            </div>
+                            <div class="msg-actions-row">
+                                <button class="speak-btn" @click="speakText(msg.content)">Speak</button>
+                                <button class="regenerate-btn" @click="regenerateResponse()" x-show="i === messages.length - 1 && !loading" title="Regenerate">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                                    Regenerate
+                                </button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </template>
+
+            <div class="chat-msg assistant" x-show="loading">
+                <div class="msg-assistant-group">
+                    <div class="msg-bubble assistant-bubble typing-indicator">
+                        <span class="typing-dot"></span>
+                        <span class="typing-dot"></span>
+                        <span class="typing-dot"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="chat-input-bar">
+            <div class="input-bar-wrap">
+                <textarea
+                    class="input-bar-textarea"
+                    x-ref="chatInput"
+                    x-model="draft"
+                    placeholder="Type a message... (Shift+Enter for new line)"
+                    rows="1"
+                    @keydown.enter.prevent="if (!$event.shiftKey) sendChatMessage()"
+                    @input="AM.utils.autoResize($event.target)"
+                ></textarea>
+                <button
+                    class="input-bar-mic"
+                    @pointerdown.prevent="AM.voice && AM.voice.handleMicDown('chat', $event)"
+                    @pointerup.prevent="AM.voice && AM.voice.handleMicUp('chat')"
+                    @pointercancel.prevent="AM.voice && AM.voice.handleMicCancel('chat')"
+                    @click.prevent="AM.voice && AM.voice.handleMicClick('chat')"
+                    :class="{ recording: $store.voice && $store.voice.target === 'chat' }"
+                    aria-label="Tap to toggle or hold to record"
+                >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+                </button>
+                <button
+                    class="input-bar-send"
+                    @click="sendChatMessage()"
+                    :disabled="!draft.trim()"
+                    aria-label="Send message"
+                >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                </button>
+                <span class="recording-timer" x-show="$store.voice && $store.voice.target === 'chat'" x-text="$store.voice ? $store.voice.time : '00:00'"></span>
+            </div>
+        </div>
+    </div>
+
+    <div
+        class="mobile-thread-sheet"
+        x-cloak
+        x-show="mobileThreadSheetOpen"
+        @click.self="mobileThreadSheetOpen = false"
+        x-transition
+    >
+        <div class="mobile-thread-sheet-panel">
+            <div class="mobile-thread-sheet-header">
+                <span>Threads</span>
+                <button @click="newConversation(); mobileThreadSheetOpen = false">+ New</button>
+            </div>
+            <div class="mobile-thread-list">
+                <template x-for="conv in conversations" :key="conv.id">
+                    <button
+                        class="mobile-thread-item"
+                        :class="{ active: activeId === conv.id }"
+                        @click="loadConversation(conv.id); mobileThreadSheetOpen = false"
+                    >
+                        <span x-text="conv.title || 'Untitled'"></span>
+                        <span x-text="AM.utils.formatDate(conv.updated_at)"></span>
+                    </button>
+                </template>
+            </div>
+        </div>
+    </div>
+</div>

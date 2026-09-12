@@ -1,0 +1,26 @@
+name: chat
+version: 0.1.0
+description: Chat with LLM — conversations, streaming, tool calling, memory extraction
+author: AnotherMe
+entrypoint: plugin
+capabilities:
+  - routes
+  - storage
+  - ui
+  - events
+dependencies:
+  - memory
+ui:
+  tab: Chat
+  icon: chat
+  order: 10
+settings:
+  - key: model
+    label: "AI Model"
+    type: select
+    default: "deepseek-v4-pro-thinking"
+    options: ["deepseek-v4-pro-thinking", "gpt-4o", "gpt-4o-mini"]
+    description: "Which model to use for chat"
+tables:
+  - chat_threads
+  - chat_messages
