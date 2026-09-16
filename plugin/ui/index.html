@@ -99,7 +99,7 @@
                                 </button>
                             </div>
                             <div class="msg-actions-row">
-                                <button class="speak-btn" @click="speakText(msg.content)">Speak</button>
+                                <button class="speak-btn" x-show="AM.isPluginEnabled('tts')" @click="speakText(msg.content)">Speak</button>
                                 <button class="regenerate-btn" @click="regenerateResponse()" x-show="i === messages.length - 1 && !loading" title="Regenerate">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                                     Regenerate
@@ -133,6 +133,7 @@
                     @input="AM.utils.autoResize($event.target)"
                 ></textarea>
                 <button
+                    x-show="AM.isPluginEnabled('stt')"
                     class="input-bar-mic"
                     @pointerdown.prevent="AM.voice && AM.voice.handleMicDown('chat', $event)"
                     @pointerup.prevent="AM.voice && AM.voice.handleMicUp('chat')"

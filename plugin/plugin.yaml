@@ -1,5 +1,5 @@
 name: chat
-version: 0.1.0
+version: 0.2.0
 description: Chat with LLM — conversations, streaming, tool calling, memory extraction
 author: AnotherMe
 entrypoint: plugin
@@ -10,6 +10,11 @@ capabilities:
   - events
 dependencies:
   - memory
+soft_dependencies:
+  - name: stt
+    enables: "voice input (mic button)"
+  - name: tts
+    enables: "read replies aloud (speak button)"
 ui:
   tab: Chat
   icon: chat
