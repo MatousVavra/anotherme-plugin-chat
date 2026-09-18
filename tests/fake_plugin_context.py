@@ -115,4 +115,10 @@ class FakePluginContext:
         return merged
 
     def get_env(self, key: str, default: str | None = None) -> str | None:
+        """Host secrets (anything ending in _SECRET/_TOKEN/_PASSWORD) are
+        never readable by plugins; the default is returned instead. Provider
+        API keys (*_API_KEY) are designed for plugin consumption and stay
+        readable."""
+        if key.upper().endswith(("_SECRET", "_TOKEN", "_PASSWORD")):
+            return default
         return self._env.get(key, os.environ.get(key, default))
