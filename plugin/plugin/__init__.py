@@ -163,20 +163,24 @@ def _save_message(conn, vault_name, role, content, thread_id):
     return cur.lastrowid
 
 
-def _get_messages(conn, vault_name, thread_id=None, limit=100):
+def _get_messages(conn, vault_name, thread_id=None, limit=100, most_recent=False):
+    order = "DESC" if most_recent else "ASC"
     if thread_id is not None:
         rows = conn.execute(
-            "SELECT role, content, created_at FROM chat_messages WHERE vault_name = ? AND thread_id = ? ORDER BY created_at ASC LIMIT ?",
+            f"SELECT role, content, created_at FROM chat_messages WHERE vault_name = ? AND thread_id = ? ORDER BY created_at {order} LIMIT ?",
             (vault_name, thread_id, limit),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT role, content, created_at FROM chat_messages WHERE vault_name = ? ORDER BY created_at ASC LIMIT ?",
+            f"SELECT role, content, created_at FROM chat_messages WHERE vault_name = ? ORDER BY created_at {order} LIMIT ?",
             (vault_name, limit),
         ).fetchall()
-    return [
+    messages = [
         {"role": r["role"], "content": r["content"], "created_at": r["created_at"]} for r in rows
     ]
+    if most_recent:
+        messages.reverse()
+    return messages
 
 
 def _clear_conversations(conn, vault_name):
@@ -225,6 +229,12 @@ def _build_system_prompt(today, context_text, questions_ctx, base_instructions, 
 # ---------------------------------------------------------------------------
 
 class Plugin:
+    def _spawn(self, coro):
+        task = asyncio.create_task(coro)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+        return task
+
     async def _auto_title(self, vault_name, cid, user_msg, assistant_reply):
         """Generate and save a 2-5 word title via LLM. Never throws."""
         try:
@@ -250,6 +260,13 @@ class Plugin:
         cid = body.conversation_id
         if cid is None:
             cid = _create_conversation(conn, vn)
+        else:
+            row = conn.execute(
+                "SELECT 1 FROM chat_threads WHERE vault_name = ? AND id = ?",
+                (vn, cid),
+            ).fetchone()
+            if not row:
+                raise HTTPException(404, "Conversation not found")
         user_msg = None
         if body.messages and body.messages[-1].role == "user":
             user_msg = body.messages[-1].content
@@ -274,7 +291,7 @@ class Plugin:
         _save_message(conn, vn, "assistant", reply, cid)
         memory_api = ctx.get_plugin_api("memory")
         if memory_api:
-            asyncio.create_task(
+            self._spawn(
                 asyncio.to_thread(
                     memory_api.extract_facts, vn, [{"role": "user", "content": user_msg or ""}, {"role": "assistant", "content": reply}]
                 )
@@ -283,8 +300,8 @@ class Plugin:
         if user_msg:
             threads = _get_conversations(conn, vn, archived=False) + _get_conversations(conn, vn, archived=True)
             current = next((t for t in threads if t["id"] == cid), None)
-            if current and current["title"] == "New conversation":
-                asyncio.create_task(self._auto_title(vn, cid, user_msg, reply))
+            if current and current["title"] in ("New conversation", "New chat"):
+                self._spawn(self._auto_title(vn, cid, user_msg, reply))
                 title_updated = True
         return title_updated
 
@@ -296,6 +313,7 @@ class Plugin:
         self._llm = ctx.llm_client
         self._tools = ctx.tool_executor
         self._registry = ctx.registry
+        self._bg_tasks = set()
 
         # --- Migration v1: chat_threads + chat_messages ---
         ctx.register_migration(1, """
@@ -320,7 +338,13 @@ class Plugin:
         """)
 
         # --- Migration v2: add is_archived column ---
-        ctx.register_migration(2, "ALTER TABLE chat_threads ADD COLUMN is_archived INTEGER DEFAULT 0;")
+        try:
+            cols = {r[1] for r in ctx.db_module.get_db().execute("PRAGMA table_info(chat_threads)")}
+            register_v2 = "is_archived" not in cols
+        except Exception:
+            register_v2 = True
+        if register_v2:
+            ctx.register_migration(2, "ALTER TABLE chat_threads ADD COLUMN is_archived INTEGER DEFAULT 0;")
 
         router = APIRouter()
 
@@ -340,7 +364,7 @@ class Plugin:
             except Exception:
                 logging.getLogger(__name__).warning("Chat with tools failed, retrying without", exc_info=True)
                 reply = await self._llm.chat(
-                    messages=[m.model_dump() for m in body.messages],
+                    messages=full_msgs,
                     system_prompt=body.system_prompt,
                     caller="chat",
                 )
@@ -442,7 +466,7 @@ class Plugin:
                 if not threads:
                     raise HTTPException(400, "No conversation to summarize")
                 conversation_id = threads[0]["id"]
-            messages = _get_messages(conn, vn, thread_id=conversation_id, limit=30)
+            messages = _get_messages(conn, vn, thread_id=conversation_id, limit=30, most_recent=True)
             if len(messages) < 4:
                 raise HTTPException(400, "Not enough conversation to summarize")
             convo_text = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
